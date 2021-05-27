@@ -127,7 +127,7 @@ def main(net_init, data_path, data_classes, data_name, MODEL, model_name, file_r
     print('The current dataset:', data_name, '  |  The current model:', model_name)
     print('[Test]  Accuracy - {:.4f}   Precision - {:.4f}   Recall - {:.4f}   AUC - {:.4f}   F1 - {:.4f}'
                 .format(test_acc, test_precision, test_recall, test_auc, test_f1))
-    file_res.write('{} {},{},{},{}, {}\n'.format(net_init.RNNUnits, test_acc, test_precision, test_recall, test_auc, test_f1))
+    file_res.write('{}, {}, {}, {}, {}, {}, {}\n'.format(datetime.datetime.now(), net_init.RNNUnits, test_acc, test_precision, test_recall, test_auc, test_f1))
 
     del X_train, y_train, X_test, y_test, model, optimizer
     gc.collect()
@@ -142,7 +142,7 @@ if __name__ == '__main__':
             print('The current dataset:', data_name, '  |  The current model:', model_name)
 
             file_res = open(f'/home/zhangxj/program/results/mtsc/{data_name}_{model_name}_results.csv', 'a+')
-            file_res.write('N, Accuracy, Precision, Recall, AUC, F1\n')
+            file_res.write('moment, rnn_units, Accuracy, Precision, Recall, AUC, F1\n')
 
             for n in [16, 32, 64]:
                 net_init.RNNUnits = n

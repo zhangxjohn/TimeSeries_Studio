@@ -1,14 +1,13 @@
 import inspect
 from typing import List
-import tensorflow_addons as tfa
-from tensorflow import keras
 from tensorflow.keras import backend as K
-from tensorflow.keras import layers
-from tensorflow.keras.layers import Activation, SpatialDropout1D, Lambda
-from tensorflow.keras.layers import Conv1D, Dense, BatchNormalization, LayerNormalization
+from tensorflow_addons.layers import WeightNormalization
+from tensorflow.keras.layers import  SpatialDropout1D, BatchNormalization, LayerNormalization
+from tensorflow.keras.layers import Layer, Input, Activation, SpatialDropout1D, Lambda, Conv1D, Dense
+from tensorflow.keras.layers import add
+from tensorflow.keras.models import Sequential, Model
 
-
-class TemporalLayer(keras.layers.Layer):
+class TemporalLayer(Layer):
 
     def __init__(self,
                  dilation_rate,
@@ -82,7 +81,7 @@ class TemporalLayer(keras.layers.Layer):
             for k in range(2):
                 name = 'conv1D_{}'.format(k)
                 with K.name_scope(name):  # name scope used to make sure weights get unique names
-                    self._add_and_activate_layer(keras.layers.Conv1D(filters=self.nb_filters,
+                    self._add_and_activate_layer(Conv1D(filters=self.nb_filters,
                                                         kernel_size=self.kernel_size,
                                                         dilation_rate=self.dilation_rate,
                                                         padding=self.padding,
@@ -90,33 +89,33 @@ class TemporalLayer(keras.layers.Layer):
                                                         kernel_initializer=self.kernel_initializer))
 
                 if self.use_batch_norm:
-                    self._add_and_activate_layer(keras.layers.BatchNormalization())
+                    self._add_and_activate_layer(BatchNormalization())
                 elif self.use_layer_norm:
-                    self._add_and_activate_layer(keras.layers.LayerNormalization())
+                    self._add_and_activate_layer(LayerNormalization())
                 elif self.use_weight_norm:
-                    self._add_and_activate_layer(tfa.layers.WeightNormalization())
+                    self._add_and_activate_layer(WeightNormalization())
 
-                self._add_and_activate_layer(keras.layers.Activation('relu'))
-                self._add_and_activate_layer(keras.layers.SpatialDropout1D(rate=self.dropout_rate))
+                self._add_and_activate_layer(Activation('relu'))
+                self._add_and_activate_layer(SpatialDropout1D(rate=self.dropout_rate))
 
             if not self.last_block:
                 # 1x1 conv to match the shapes (channel dimension).
                 name = 'conv1D_{}'.format(k + 1)
                 with K.name_scope(name):
                     # make and build this layer separately because it directly uses input_shape
-                    self.shape_match_conv = keras.layers.Conv1D(filters=self.nb_filters,
+                    self.shape_match_conv = Conv1D(filters=self.nb_filters,
                                                    kernel_size=1,
                                                    padding='same',
                                                    name=name,
                                                    kernel_initializer=self.kernel_initializer)
 
             else:
-                self.shape_match_conv = keras.layers.Lambda(lambda x: x, name='identity')
+                self.shape_match_conv = Lambda(lambda x: x, name='identity')
 
             self.shape_match_conv.build(input_shape)
             self.res_output_shape = self.shape_match_conv.compute_output_shape(input_shape)
 
-            self.final_activation = keras.layers.Activation(self.activation)
+            self.final_activation = Activation(self.activation)
             self.final_activation.build(self.res_output_shape)  # probably isn't necessary
 
             # this is done to force Keras to add the layers in the list to self._layers
@@ -137,7 +136,7 @@ class TemporalLayer(keras.layers.Layer):
             self.layers_outputs.append(x)
         x2 = self.shape_match_conv(inputs)
         self.layers_outputs.append(x2)
-        res_x = layers.add([x2, x])
+        res_x = add([x2, x])
         self.layers_outputs.append(res_x)
 
         res_act_x = self.final_activation(res_x)
@@ -148,7 +147,7 @@ class TemporalLayer(keras.layers.Layer):
         return [self.res_output_shape, self.res_output_shape]
 
 
-class TemporalConvNet(keras.layers.Layer):
+class TemporalConvNet(Layer):
     """Creates a TCN layer.
 
         Input shape:
@@ -226,7 +225,7 @@ class TemporalConvNet(keras.layers.Layer):
         return self.kernel_size * self.nb_stacks * self.dilations[-1]
 
     def build(self, input_shape):
-        self.main_conv1D = keras.layers.Conv1D(filters=self.nb_filters,
+        self.main_conv1D = Conv1D(filters=self.nb_filters,
                                   kernel_size=1,
                                   padding=self.padding,
                                   kernel_initializer=self.kernel_initializer)
@@ -292,7 +291,7 @@ class TemporalConvNet(keras.layers.Layer):
             self.layers_outputs.append(x)
 
         if self.use_skip_connections:
-            x = layers.add(self.skip_connections)
+            x = add(self.skip_connections)
             self.layers_outputs.append(x)
         if not self.return_sequences:
             x = self.lambda_layer(x)
@@ -322,14 +321,14 @@ class TemporalConvNet(keras.layers.Layer):
  
 def TCN(init, input_shape):
     # input_shape: [batch_size, time_steps, nb_time_series]
-    x = keras.layers.Input(input_shape)
+    x = Input(input_shape)
     
-    y = TemporalConvNet(nb_filters=init.CNNFilters, use_batch_norm=False)(x)
+    y = TemporalConvNet(nb_filters=init.CNNFilters)(x)
     
-    y = keras.layers.Dense(init.FeatDims)(y)
+    y = Dense(init.FeatDims)(y)
     if init.task == 'classification':
-        y = keras.layers.Activation('softmax')(y)
+        y = Activation('softmax')(y)
 
-    model = keras.models.Model(inputs=x, outputs=y)
+    model = Model(inputs=x, outputs=y)
 
     return model
