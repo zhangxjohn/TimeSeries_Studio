@@ -86,4 +86,3 @@ def ResNet(init, input_shape):
 
     return model
 
-

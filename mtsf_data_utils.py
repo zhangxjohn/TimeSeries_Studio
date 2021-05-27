@@ -98,8 +98,6 @@ class DataUtil(object):
 
 
 
-
-
 class M2UDataUtil(object):
     """
         Electricity | EXchange_Rate | Solar_AL | Traffic

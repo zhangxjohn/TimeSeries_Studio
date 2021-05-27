@@ -1,11 +1,11 @@
 import inspect
 from typing import List
-from tensorflow.keras import backend as K
 from tensorflow_addons.layers import WeightNormalization
 from tensorflow.keras.layers import  SpatialDropout1D, BatchNormalization, LayerNormalization
 from tensorflow.keras.layers import Layer, Input, Activation, SpatialDropout1D, Lambda, Conv1D, Dense
 from tensorflow.keras.layers import add
 from tensorflow.keras.models import Sequential, Model
+from tensorflow.keras import backend as K
 
 class TemporalLayer(Layer):
 
