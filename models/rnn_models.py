@@ -4,7 +4,7 @@ from tensorflow.keras.models import Sequential, Model
 from tensorflow.keras import backend as K
 
 
-def naive_RNN(init, input_shape, mode='singal-layer'):
+def naive_RNNs(init, input_shape, mode='singal-layer'):
 
     # input_shape: [batch, timesteps, features]
 

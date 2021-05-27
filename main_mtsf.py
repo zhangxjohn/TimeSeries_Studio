@@ -2,7 +2,7 @@ import os, gc, time, datetime, argparse
 import numpy as np 
 from tensorflow import keras
 
-from models.rnn_models import naive_RNN, LSTM, GRU
+from models.rnn_models import naive_RNNs, LSTMs, GRUs
 from models.fcn import FCN
 from models.lstm_fcn import LSTM_FCN, ALSTM_FCN
 from models.lstnet import LSTNet, AR
@@ -34,9 +34,9 @@ Data_Config = {
 }
 
 Model = {
-    # 'naive_RNN': naive_RNN, 
-    # 'LSTM': LSTM,
-    # 'GRU': GRU,
+    # 'naive_RNN': naive_RNNs, 
+    # 'LSTM': LSTMs,
+    # 'GRU': GRUs,
     'LSTNet': LSTNet,
     # 'LSTM_FCN': LSTM_FCN,
     # 'ALSTM_FCN': ALSTM_FCN,

@@ -4,7 +4,7 @@ import pandas as pd
 import tensorflow as tf
 from tensorflow import keras
 
-from models.rnn_models import naive_RNN, LSTM, GRU
+from models.rnn_models import naive_RNN, LSTMs, GRUs
 from models.fcn import FCN
 from models.lstm_fcn import LSTM_FCN, ALSTM_FCN
 from models.lstnet import LSTNet
@@ -53,9 +53,9 @@ Data_Config = {
 }
 
 Model = {
-    'naive_RNN': naive_RNN,
-    'LSTM': LSTM,
-    'GRU': GRU,
+    'naive_RNN': naive_RNNs,
+    'LSTM': LSTMs,
+    'GRU': GRUs,
     'FCN': FCN,
     'LSTM_FCN': LSTM_FCN,
     'ALSTM_FCN': ALSTM_FCN,
