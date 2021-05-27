@@ -4,7 +4,7 @@ import pandas as pd
 import tensorflow as tf
 from tensorflow import keras
 
-from models.rnn_models import naive_RNN, LSTMs, GRUs
+from models.rnn_models import naive_RNNs, LSTMs, GRUs
 from models.fcn import FCN
 from models.lstm_fcn import LSTM_FCN, ALSTM_FCN
 from models.lstnet import LSTNet
