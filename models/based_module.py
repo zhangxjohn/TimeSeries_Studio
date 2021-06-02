@@ -2,7 +2,7 @@ import numpy as np
 import tensorflow as tf
 import tensorflow.keras.backend as K
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Conv1D, SimpleRNN, GRU, LSTM, SeparableConv1D
+from tensorflow.keras.layers import Dense, Conv1D, SimpleRNN, GRU, LSTM, SeparableConv1D, Bidirectional
 from tensorflow.keras.layers import Layer, Lambda, Dropout, Activation, LayerNormalization, BatchNormalization
 
 
@@ -19,7 +19,8 @@ ts_custom_objects = {
     'SqueezeExcitation': SqueezeExcitation,
     'GRU': GRU,
     'LSTM': LSTM,
-    'SimpleRNN': SimpleRNN
+    'SimpleRNN': SimpleRNN,
+    'BidirectionalLSTM': BidirectionalLSTM
 }
 
 
@@ -116,9 +117,9 @@ class TrainablePositionEncoding(Layer):
         super(TrainablePositionEncoding, self).build(input_shape)
 
     def call(self, inputs, **kwargs):
-        result = inputs + self.position_embeddings
+        position_encodings = inputs + self.position_embeddings
 
-        return result    
+        return position_encodings    
 
 
 class MultiHeadSelfAttention(Layer):
@@ -297,7 +298,23 @@ class SqueezeExcitation(Layer):
         x = self.dense_att1(x)
         x = self.dense_att2(x)
         outputs = tf.multiply(inputs, tf.expand_dims(x, axis=2))
-        return outouts
+        return outputs
 
+
+class BidirectionalLSTM(Layer):
+    """
+    input: original time series: (none, time_steps, nb_variables)
+    output: attention time series: (none, time_steps, new_nb_variables)
+    """
+    def __init__(self, nb_units, **kwargs):
+        self.nb_units = nb_units
+        super(BidirectionalLSTM, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+        self.blstm = Bidirectional(LSTM(self.nb_units, return_sequences=True))
+        super(BidirectionalLSTM, self).build(input_shape)
+
+    def call(self, inputs, **kwargs):
+        return self.blstm(inputs)
 
 
