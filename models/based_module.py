@@ -1,8 +1,27 @@
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras import Sequential
-from tensorflow.keras.layers import Layer, Lambda, Dropout, GRU, Dense
 import tensorflow.keras.backend as K
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Conv1D, SimpleRNN, GRU, LSTM, SeparableConv1D
+from tensorflow.keras.layers import Layer, Lambda, Dropout, Activation, LayerNormalization, BatchNormalization
+
+
+ts_custom_objects = {
+    'SkipGRU': SkipGRU,
+    'Autoregressive': Autoregressive,
+    'PositionEncoding': PositionEncoding,
+    'TrainablePositionEncoding': TrainablePositionEncoding,
+    'MultiHeadSelfAttention': MultiHeadSelfAttention,
+    'MultiheadAttention': MultiheadAttention,
+    'CausalConvResidual': CausalConvResidual,
+    'DenseAttention': DenseAttention,
+    'SpatialAttention': SpatialAttention,
+    'SqueezeExcitation': SqueezeExcitation,
+    'GRU': GRU,
+    'LSTM': LSTM,
+    'SimpleRNN': SimpleRNN
+}
+
 
 class SkipGRU(Layer):
     """
@@ -11,13 +30,12 @@ class SkipGRU(Layer):
     cnn_unit: the number of 1D conv output filters.
     rnn_unit: the number of rnn outputs.
 
-    input: CNN output : (none, time_steps, filters)
+    input: CNN output : (none, time_steps, input_dim)
     output: (none, skip*rnn_units)
     """
     def __init__(self, pt, skip, cnn_units, rnn_units, dropout=0.0, *kwargs):
         super(SkipGRU, self).__init__(*kwargs)
 
-        # c: batch_size*steps*filters, steps=P-Ck
         self.pretrans = Sequential([
             Lambda(lambda k: k[:, int(-pt*skip):, :]),
             Lambda(lambda k: K.reshape(k, (-1, pt, skip, cnn_units))),
@@ -41,7 +59,7 @@ class Autoregressive(Layer):
     input: original time series: (none, time_steps, nb_variables)
     output: (none, nb_variables)
     """
-    def __init__(self, hw, m, *kwargs):
+    def __init__(self, hw, input_dim, *kwargs):
         super(Autoregressive, self).__init__(*kwargs)
 
         self.pretrans = Sequential([
@@ -50,7 +68,7 @@ class Autoregressive(Layer):
             Lambda(lambda k: K.reshape(k, (-1, hw)))
         ])
         self.linear = Dense(1)
-        self.posttrans = Lambda(lambda k: K.reshape(k, (-1, m)))
+        self.posttrans = Lambda(lambda k: K.reshape(k, (-1, input_dim)))
 
     def call(self, inputs, *kwargs):
         z = self.pretrans(inputs)
@@ -94,28 +112,38 @@ class TrainablePositionEncoding(Layer):
             initializer='uniform',
             name='word_position_embeddings',
             trainable=True)
-        super().build(input_shape)
+        super(TrainablePositionEncoding, self).build(input_shape)
 
     def call(self, inputs, **kwargs):
         result = inputs + self.position_embeddings
 
         return result    
 
-class MultiHeadSelfAttention(Layer):
 
-    def __init__(self, embed_dim, num_heads=8, **kwargs):
+class MultiHeadSelfAttention(Layer):
+    """
+    input: original time series: (none, time_steps, nb_variables)
+    output: (none, time_steps, nb_variables)
+    """
+    def __init__(self, embed_dim, num_heads=8, use_residual=False, use_bn=False, **kwargs):
         super(MultiHeadSelfAttention, self).__init__(**kwargs)
         self.embed_dim = embed_dim
         self.num_heads = num_heads
+        self.use_residual = use_residual
+        self.use_bn = use_bn
 
         if embed_dim % num_heads != 0:
             raise ValueError(f"embedding dimension = {embed_dim} should be divisible by number of heads = {num_heads}")
         self.projection_dim = embed_dim // num_heads
 
-        self.query_dense = Dense(embed_dim)
-        self.key_dense = Dense(embed_dim)
-        self.value_dense = Dense(embed_dim)
-        self.combine_heads = Dense(embed_dim)
+    def build(self, input_shape):
+        self.query_dense = Dense(self.embed_dim, activation='relu')
+        self.key_dense = Dense(self.embed_dim, activation='relu')
+        self.value_dense = Dense(self.embed_dim, activation='relu')
+        self.combine_heads = Dense(self.embed_dim, activation='relu')
+        self.residual = Dense(self.embed_dim, activation='relu')
+        self.batch_norm = BatchNormalization()
+        super(MultiHeadSelfAttention, self).build(input_shape)
 
     def attention(self, query, key, value):
         score = tf.matmul(query, key, transpose_b=True)
@@ -130,22 +158,145 @@ class MultiHeadSelfAttention(Layer):
         return tf.transpose(x, perm=[0, 2, 1, 3])
 
     def call(self, inputs, **kwargs):
-        # x.shape = [batch_size, seq_len, embedding_dim]
         batch_size = tf.shape(inputs)[0]
 
-        query = self.query_dense(inputs)  # (batch_size, seq_len, embed_dim)
-        key = self.key_dense(inputs)      # (batch_size, seq_len, embed_dim)
-        value = self.value_dense(inputs)  # (batch_size, seq_len, embed_dim)
+        query = self.query_dense(inputs) 
+        key = self.key_dense(inputs)      
+        value = self.value_dense(inputs) 
 
-        query = self.separate_heads(query, batch_size)  # (batch_size, num_heads, seq_len, projection_dim)
-        key = self.separate_heads(key, batch_size)      # (batch_size, num_heads, seq_len, projection_dim)
-        value = self.separate_heads(value, batch_size)  # (batch_size, num_heads, seq_len, projection_dim)
+        if self.use_residual:
+            res = self.residual(inputs)
+
+        query = self.separate_heads(query, batch_size) 
+        key = self.separate_heads(key, batch_size)     
+        value = self.separate_heads(value, batch_size) 
 
         attention, weights = self.attention(query, key, value)
-        attention = tf.transpose(attention, perm=[0, 2, 1, 3])  # (batch_size, seq_len, num_heads, projection_dim)
+        attention = tf.transpose(attention, perm=[0, 2, 1, 3]) 
 
-        concat_attention = tf.reshape(attention, (batch_size, -1, self.embed_dim))  # (batch_size, seq_len, embed_dim)
-        output = self.combine_heads(concat_attention)  # (batch_size, seq_len, embed_dim)
+        concat_attention = tf.reshape(attention, (batch_size, -1, self.embed_dim))  
+        outputs = self.combine_heads(concat_attention)
 
-        return output
+        if self.use_residual:
+            outputs += res 
+        outputs = self.batch_norm(outputs) if self.use_bn else outputs
+
+        return outputs
+
+
+class CausalConvResidual(Layer):
+    """
+    input: original time series: (none, time_steps, nb_variables)
+    output: (none, time_steps, nb_variables)
+    """
+    def __init__(self, nb_filters, kernel_size, dropout=0.1, dilation_rate=1, norm_before=False, **kwargs):
+        super(Conv1D, self).__init__(**kwargs)
+
+        self.conv_layers1 = Sequential([
+            Conv1D(nb_filters, kernel_size, 1, padding='same', dilation_rate=1),
+            Activation('relu')
+        ])
+        self.conv_layers2 = Sequential([
+            Conv1D(nb_filters, kernel_size, 1, padding='same', dilation_rate=1),
+            Activation('relu')            
+        ])
+        self.dilated_conv_layers1 = Sequential([
+            Conv1D(nb_filters, kernel_size, 1, padding='causal', dilation_rate=dilation_rate),
+            Activation('relu') 
+        ])
+        self.dilated_conv_layers2 = Sequential([
+            Conv1D(nb_filters, kernel_size, 1, padding='causal', dilation_rate=dilation_rate),
+            Activation('relu') 
+        ])
+
+        self.norm =  LayerNormalization()
+        self.dropout = Dropout(dropout)
+        self.norm_before = norm_before
+    
+    def call(self, inputs, masks=None, **kwargs):
+        no_zero_mask = tf.cast(masks, tf.float32) if masks is None else tf.cast(tf.ones_like(inputs), tf.float32)
+
+        x2 = self.norm(inputs) if self.norm_before else x
+        
+        x2 = self.conv_layers1(x2) * no_zero_mask
+        x2 = self.dilated_conv_layers1(x2) * no_zero_mask
+        x2 = self.conv_layers2(x2) * no_zero_mask
+        x2 = self.dilated_conv_layers2(x2) * no_zero_mask  
+
+        x = x + self.dropout(x2)
+
+        x = self.norm(x) if not self.norm_before else x
+
+        return x   
+
+   
+class DenseAttention(Layer):
+    """
+    input: original time series: (none, time_steps, nb_variables)
+    output: attention time series: (none, time_steps, nb_variables)
+    """
+    def __init__(self, **kwargs):
+        super(DenseAttention, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+        time_steps = input_shape[1]
+        self.dense = Dense(time_steps, activation='softmax')
+        super(DenseAttention, self).build(input_shape)
+
+    def call(self, inputs, **kwargs):
+        x = tf.transpose(inputs, perm=[0, 2, 1])
+        x = self.dense(x)
+        x_probs = tf.transpose(x, perm=[0, 2, 1])
+        x = tf.multiply(inputs, x_probs)
+        return x
+
+
+class SpatialAttention(Layer):
+    """
+    input: original time series: (none, time_steps, nb_variables)
+    output: attention time series: (none, time_steps, nb_variables)
+    """
+    def __init__(self, **kwargs):
+        super(SpatialAttention, self).__init__(**kwargs)   
+    
+    def build(self, input_shape):
+        input_dim = input_shape[-1]
+        self.dense = Dense(input_dim, activation='softmax')
+        super(SpatialAttention, self).build(input_shape)
+
+    def call(self, inputs, **kwargs):
+        x_probs = self.dense(inputs)
+        x = tf.multiply(inputs, x_probs)
+        return x
+
+
+class SqueezeExcitation(Layer):
+    """
+    input: original time series: (none, time_steps, nb_variables)
+    output: attention time series: (none, time_steps, nb_variables)
+    """
+    def __init__(self, pooling_op='mean', reduction_ratio=3, **kwargs):
+        super(SqueezeExcitation, self).__init__(**kwargs) 
+        self.pooling_op = pooling_op
+        self.reduction_ratio = reduction_ratio
+    
+    def build(self, input_shape):
+        self.seq_length = input_shape[1]
+        self.input_dim = input_shape[-1]
+        self.reduction_num = max(self.seq_length//self.reduction_ratio, 1)
+        self.dense_att1 = Dense(self.reduction_num, activation='relu')
+        self.dense_att2 = Dense(self.seq_length, activation='sigmoid')
+        super(SqueezeExcitation, self).build(input_shape)
+
+    def call(self, inputs, **kwargs):
+        if self.pooling_op == 'max':
+            x = tf.reduce_max(inputs, axis=-1)
+        else:
+            x = tf.reduce_mean(inputs, axis=-1)
+        x = self.dense_att1(x)
+        x = self.dense_att2(x)
+        outputs = tf.multiply(inputs, tf.expand_dims(x, axis=2))
+        return outouts
+
+
 
