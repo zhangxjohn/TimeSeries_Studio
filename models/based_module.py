@@ -7,20 +7,21 @@ from tensorflow.keras.layers import Layer, Lambda, Dropout, Activation, LayerNor
 
 
 ts_custom_objects = {
+    'SimpleRNN': SimpleRNN,
+    'GRU': GRU,
+    'LSTM': LSTM,
+    'BidirectionalLSTM': BidirectionalLSTM,
     'SkipGRU': SkipGRU,
     'Autoregressive': Autoregressive,
     'PositionEncoding': PositionEncoding,
     'TrainablePositionEncoding': TrainablePositionEncoding,
     'MultiHeadSelfAttention': MultiHeadSelfAttention,
     'MultiheadAttention': MultiheadAttention,
-    'CausalConvResidual': CausalConvResidual,
+    'CausalResidual1D': CausalResidual1D,
+    'GatedDilatedConv1D': GatedDilatedConv1D,
     'DenseAttention': DenseAttention,
     'SpatialAttention': SpatialAttention,
     'SqueezeExcitation': SqueezeExcitation,
-    'GRU': GRU,
-    'LSTM': LSTM,
-    'SimpleRNN': SimpleRNN,
-    'BidirectionalLSTM': BidirectionalLSTM
 }
 
 
@@ -186,35 +187,32 @@ class MultiHeadSelfAttention(Layer):
         return outputs
 
 
-class CausalConvResidual(Layer):
+class CausalResidual1D(Layer):
     """
     input: original time series: (none, time_steps, nb_variables)
     output: (none, time_steps, nb_variables)
     """
     def __init__(self, nb_filters, kernel_size, dropout=0.1, dilation_rate=1, norm_before=False, **kwargs):
-        super(Conv1D, self).__init__(**kwargs)
-
-        self.conv_layers1 = Sequential([
-            Conv1D(nb_filters, kernel_size, 1, padding='same', dilation_rate=1),
-            Activation('relu')
-        ])
-        self.conv_layers2 = Sequential([
-            Conv1D(nb_filters, kernel_size, 1, padding='same', dilation_rate=1),
-            Activation('relu')            
-        ])
-        self.dilated_conv_layers1 = Sequential([
-            Conv1D(nb_filters, kernel_size, 1, padding='causal', dilation_rate=dilation_rate),
-            Activation('relu') 
-        ])
-        self.dilated_conv_layers2 = Sequential([
-            Conv1D(nb_filters, kernel_size, 1, padding='causal', dilation_rate=dilation_rate),
-            Activation('relu') 
-        ])
-
-        self.norm =  LayerNormalization()
-        self.dropout = Dropout(dropout)
+        super(CausalResidual1D, self).__init__(**kwargs)
+        self.nb_filters = nb_filters
+        self.kernel_size = kernel_size
+        self.dropout = dropout
+        self.dilation_rate = dilation_rate
         self.norm_before = norm_before
-    
+
+    def build(self, input_shape):
+        self.conv_layers1 = Conv1D(self.nb_filters, self.kernel_size, 
+                        padding='same', dilation_rate=1, activation='relu')
+        self.conv_layers2 = Conv1D(self.nb_filters, self.kernel_size, 
+                        padding='same', dilation_rate=1, activation='relu')
+        self.dilated_conv_layers1 = Conv1D(self.nb_filters, self.kernel_size, 
+                        padding='causal', dilation_rate=self.dilation_rate, activation='relu')
+        self.dilated_conv_layers2 = Conv1D(self.nb_filters, self.kernel_size, 
+                        padding='causal', dilation_rate=self.dilation_rate, activation='relu')
+        self.norm =  LayerNormalization()
+        self.dropout = Dropout(self.dropout)
+        super(CausalResidual1D, self).build(input_shape)
+
     def call(self, inputs, masks=None, **kwargs):
         no_zero_mask = tf.cast(masks, tf.float32) if masks is None else tf.cast(tf.ones_like(inputs), tf.float32)
 
@@ -227,9 +225,39 @@ class CausalConvResidual(Layer):
 
         x = x + self.dropout(x2)
 
-        x = self.norm(x) if not self.norm_before else x
+        outputs = self.norm(x) if not self.norm_before else x
 
-        return x   
+        return outputs   
+
+
+class GatedDilatedConv1D(Layer):
+    """
+    input: original time series: (none, time_steps, nb_variables)
+    output: attention time series: (none, new_time_steps, new_nb_variables)
+    """
+    def __init__(self, nb_filters, kernel_size, dilation_rate=1, **kwargs):
+        super(GatedDilatedConv1D, self).__init__(**kwargs)
+        self.nb_filters = nb_filters
+        self.kernel_size = kernel_size
+        self.dilation_rate = dilation_rate
+
+    def build(self, input_shape):
+        self.conv_x = Conv1D(self.nb_filters, 1, padding='same', activation='relu')
+        self.conv_f = Conv1D(self.nb_filters, self.kernel_size, padding='causal', 
+                        dilation_rate=self.dilation_rate, activation='tanh')
+        self.conv_g = Conv1D(self.nb_filters, self.kernel_size, padding='causal', 
+                        dilation_rate=self.dilation_rate, activation='sigmoid')
+        self.conv_z = Conv1D(self.nb_filters, 1, padding='same', activation='relu')
+        super(GatedDilatedConv1D, self).build(input_shape)
+
+    def call(self, inputs, **kwargs):
+        conv_x = self.conv_x(inputs)
+        conv_f = self.conv_f(conv_x)
+        conv_g = self.conv_g(conv_x)
+        conv_z = tf.multiply(conv_f, conv_g)
+        conv_z = self.conv_z(conv_z)
+        outputs = tf.add([conv_x, conv_z])
+        return outputs
 
    
 class DenseAttention(Layer):
