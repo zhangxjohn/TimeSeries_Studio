@@ -51,6 +51,7 @@ class SkipGRU(Layer):
         s = self.posttrans(s)
         return s
 
+
 class Autoregressive(Layer):
     """
     hw: horizon window, the window size of the highway component.
