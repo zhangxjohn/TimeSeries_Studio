@@ -17,7 +17,7 @@ ts_custom_objects = {
     'TrainablePositionEncoding': TrainablePositionEncoding,
     'MultiHeadSelfAttention': MultiHeadSelfAttention,
     'MultiheadAttention': MultiheadAttention,
-    'CausalResidual1D': CausalResidual1D,
+    'CausalResidualConv1D': CausalResidualConv1D,
     'GatedDilatedConv1D': GatedDilatedConv1D,
     'DenseAttention': DenseAttention,
     'SpatialAttention': SpatialAttention,
@@ -187,13 +187,13 @@ class MultiHeadSelfAttention(Layer):
         return outputs
 
 
-class CausalResidual1D(Layer):
+class CausalResidualConv1D(Layer):
     """
     input: original time series: (none, time_steps, nb_variables)
     output: (none, time_steps, nb_variables)
     """
     def __init__(self, nb_filters, kernel_size, dropout=0.1, dilation_rate=1, norm_before=False, **kwargs):
-        super(CausalResidual1D, self).__init__(**kwargs)
+        super(CausalResidualConv1D, self).__init__(**kwargs)
         self.nb_filters = nb_filters
         self.kernel_size = kernel_size
         self.dropout = dropout
@@ -211,7 +211,7 @@ class CausalResidual1D(Layer):
                         padding='causal', dilation_rate=self.dilation_rate, activation='relu')
         self.norm =  LayerNormalization()
         self.dropout = Dropout(self.dropout)
-        super(CausalResidual1D, self).build(input_shape)
+        super(CausalResidualConv1D, self).build(input_shape)
 
     def call(self, inputs, masks=None, **kwargs):
         no_zero_mask = tf.cast(masks, tf.float32) if masks is None else tf.cast(tf.ones_like(inputs), tf.float32)
